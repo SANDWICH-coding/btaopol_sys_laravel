@@ -14,6 +14,11 @@ class YearLevel extends Model
         'yearLevelName',
     ];
 
+    public function enrollments()
+    {
+        return $this->hasMany(Enrollment::class, 'yearLevelId', 'yearLevelId');
+    }
+
     public function classArms()
     {
         return $this->hasMany(ClassArm::class, 'yearLevelId', 'yearLevelId');

@@ -18,6 +18,11 @@ class ClassArm extends Model
 
     public function yearLevel()
     {
-        return $this->belongsTo(YearLevel::class, 'yearLevelId');
+        return $this->belongsTo(YearLevel::class, 'yearLevelId', 'yearLevelId');
+    }
+
+    public function enrollments()
+    {
+        return $this->hasMany(Enrollment::class, 'classArmId', 'classArmId');
     }
 }

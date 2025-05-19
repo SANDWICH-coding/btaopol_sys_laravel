@@ -7,6 +7,12 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
 use App\Models\Enrollment;
 use App\Models\Student;
+use App\Models\YearLevel;
+use App\Models\ClassArm;
+use App\Models\SchoolYear;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
+
 
 $enrollmentNumber = strtoupper(Str::random(12));
 
@@ -17,8 +23,35 @@ class EnrollmentController extends Controller
      */
     public function index()
     {
-        //
+        // Get the active school year
+        $activeSchoolYear = SchoolYear::where('status', 1)->first();
+
+        if (!$activeSchoolYear) {
+            return response()->json(['message' => 'No active school year found.'], 404);
+        }
+
+        // Get students who have enrollment in the active school year
+        $students = Student::whereHas('enrollments', function ($query) use ($activeSchoolYear) {
+            $query->where('schoolYearId', $activeSchoolYear->schoolYearId);
+        })
+            ->with([
+                'enrollments' => function ($query) use ($activeSchoolYear) {
+                    $query->where('schoolYearId', $activeSchoolYear->schoolYearId);
+                }
+            ])
+            ->get();
+
+        $yearLevels = YearLevel::with('classArms')->get();
+        $classArms = ClassArm::all();
+
+        return response()->json([
+            'students' => $students,
+            'yearLevels' => $yearLevels,
+            'classArms' => $classArms,
+        ]);
     }
+
+
 
     /**
      * Show the form for creating a new resource.
@@ -33,11 +66,14 @@ class EnrollmentController extends Controller
      */
     public function store(Request $request)
     {
-        $validated = $request->validate([
-            'lrn' => 'nullable|unique:students,lrn',
-            'firstName' => 'required|string|max:255',
+        Log::info('Received enrollment data:', $request->all());
+
+        $validator = Validator::make($request->all(), [
+            'studentId' => 'required_if:enrollmentType,old/continuing|exists:students,studentId',
+            'lrn' => 'nullable',
+            'firstName' => 'required_if:enrollmentType,new,transferee|string|max:255',
             'middleName' => 'nullable|string|max:255',
-            'lastName' => 'required|string|max:255',
+            'lastName' => 'required_if:enrollmentType,new,transferee|string|max:255',
             'suffix' => 'nullable|string|max:10',
             'profilePhoto' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
 
@@ -46,11 +82,18 @@ class EnrollmentController extends Controller
             'enrollmentType' => 'required|in:new,transferee,old/continuing',
         ]);
 
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validation failed.',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+        $validated = $validator->validated();
+
         DB::beginTransaction();
 
         try {
-            // ✅ Get active school year
-            $activeSchoolYear = \App\Models\SchoolYear::where('status', 1)->first();
+            $activeSchoolYear = SchoolYear::where('status', 1)->first();
 
             if (!$activeSchoolYear) {
                 return response()->json([
@@ -58,27 +101,33 @@ class EnrollmentController extends Controller
                 ], 422);
             }
 
-            // Handle file upload
+            // Handle file upload if any
+            $profilePhotoPath = null;
             if ($request->hasFile('profilePhoto')) {
                 $file = $request->file('profilePhoto');
                 $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
                 $file->storeAs('public/profile_photos', $filename);
                 $profilePhotoPath = 'storage/profile_photos/' . $filename;
-            } else {
-                $profilePhotoPath = null;
             }
 
-            // Create student
-            $student = Student::create([
-                'lrn' => $validated['lrn'] ?? null,
-                'firstName' => $validated['firstName'],
-                'middleName' => $validated['middleName'] ?? null,
-                'lastName' => $validated['lastName'],
-                'suffix' => $validated['suffix'] ?? null,
-                'profilePhoto' => $profilePhotoPath,
-            ]);
+            if ($validated['enrollmentType'] === 'old/continuing') {
+                // Use existing student
+                $student = Student::findOrFail($validated['studentId']);
+            } else {
+                // Create new student
+                $student = Student::create([
+                    'lrn' => $validated['lrn'] ?? null,
+                    'firstName' => $validated['firstName'],
+                    'middleName' => $validated['middleName'] ?? null,
+                    'lastName' => $validated['lastName'],
+                    'suffix' => $validated['suffix'] ?? null,
+                    'profilePhoto' => $profilePhotoPath,
+                ]);
+            }
 
-            // Generate 12-char alphanumeric enrollment number
+            Log::info('Student:', $student->toArray());
+
+            // Generate enrollment number
             $enrollmentNumber = strtoupper(Str::random(12));
 
             // Create enrollment
@@ -91,6 +140,8 @@ class EnrollmentController extends Controller
                 'enrollmentType' => $validated['enrollmentType'],
             ]);
 
+            Log::info('Enrollment created:', $enrollment->toArray());
+
             DB::commit();
 
             return response()->json([
@@ -101,13 +152,13 @@ class EnrollmentController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
+            Log::error('Enrollment error: ' . $e->getMessage());
             return response()->json([
                 'message' => 'Enrollment failed.',
                 'error' => $e->getMessage()
             ], 500);
         }
     }
-
 
 
     /**

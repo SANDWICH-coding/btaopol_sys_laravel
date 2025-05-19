@@ -18,4 +18,9 @@ class Student extends Model
         'suffix',
         'profilePhoto'
     ];
+
+    public function enrollments()
+    {
+        return $this->hasMany(Enrollment::class, 'studentId', 'studentId');
+    }
 }
