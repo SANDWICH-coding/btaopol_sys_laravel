@@ -32,35 +32,40 @@ class BillingDiscountEnrollmentController extends Controller
     {
         $validated = $request->validate([
             'enrollmentId' => 'required|exists:enrollments,enrollmentId',
-            'billingDiscountIds' => 'required|array',
+            'billingDiscountIds' => 'array', // Make it optional and allow empty arrays
             'billingDiscountIds.*' => 'exists:billing_discounts,billingDiscountId',
         ]);
 
         $enrollmentId = $validated['enrollmentId'];
-        $discountIds = $validated['billingDiscountIds'];
+        $discountIds = $validated['billingDiscountIds'] ?? [];
 
         // Get the enrollment model
         $enrollment = Enrollment::findOrFail($enrollmentId);
 
-        // Attach discounts (replaces existing if needed)
-        $enrollment->billingDiscounts()->sync($discountIds); // or ->attach() to add without removing
+        // Sync (adds, updates, or removes all depending on array content)
+        $enrollment->billingDiscounts()->sync($discountIds); // Empty array removes all
 
         return response()->json([
-            'message' => 'Discounts applied to enrollment successfully.',
+            'message' => 'Discounts updated successfully.',
         ]);
     }
+
 
     /**
      * Display the specified resource.
      */
     public function show(string $id)
     {
-        $discounts = BillingDiscountEnrollment::with('billingDiscount')
-            ->where('enrollmentId', $id)
-            ->get();
+        $discounts = BillingDiscountEnrollment::where('enrollmentId', $id)
+            ->pluck('billingDiscountId'); // This returns array of IDs
 
-        return response()->json($discounts);
+        return response()->json([
+            'message' => 'Applied discounts retrieved successfully.',
+            'data' => $discounts,
+        ]);
     }
+
+
 
     /**
      * Show the form for editing the specified resource.

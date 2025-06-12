@@ -88,6 +88,7 @@ class EnrollmentController extends Controller
                 'errors' => $validator->errors()
             ], 422);
         }
+
         $validated = $validator->validated();
 
         DB::beginTransaction();
@@ -111,24 +112,26 @@ class EnrollmentController extends Controller
             }
 
             if ($validated['enrollmentType'] === 'old/continuing') {
-                // Use existing student
                 $student = Student::findOrFail($validated['studentId']);
             } else {
-                // Create new student
                 $student = Student::create([
                     'lrn' => $validated['lrn'] ?? null,
-                    'firstName' => $validated['firstName'],
-                    'middleName' => $validated['middleName'] ?? null,
-                    'lastName' => $validated['lastName'],
-                    'suffix' => $validated['suffix'] ?? null,
+                    'firstName' => strtoupper($validated['firstName']),
+                    'middleName' => isset($validated['middleName']) ? strtoupper($validated['middleName']) : null,
+                    'lastName' => strtoupper($validated['lastName']),
+                    'suffix' => isset($validated['suffix']) ? strtoupper($validated['suffix']) : null,
                     'profilePhoto' => $profilePhotoPath,
                 ]);
             }
 
             Log::info('Student:', $student->toArray());
 
-            // Generate enrollment number
-            $enrollmentNumber = strtoupper(Str::random(12));
+            // Generate enrollment number: 2025-XXXXXX
+            $yearStart = $activeSchoolYear->yearStart;
+            do {
+                $randomSixDigits = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+                $enrollmentNumber = $yearStart . '-' . $randomSixDigits;
+            } while (Enrollment::where('enrollmentNumber', $enrollmentNumber)->exists());
 
             // Create enrollment
             $enrollment = Enrollment::create([
@@ -159,6 +162,7 @@ class EnrollmentController extends Controller
             ], 500);
         }
     }
+
 
 
     /**
